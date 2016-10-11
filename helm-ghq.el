@@ -103,11 +103,27 @@
 (defun helm-ghq--open-dired (file)
   (dired (file-name-directory file)))
 
+(defun helm-ghq--open-dired-with-dircotry (dircotry)
+  (dired (concat (helm-ghq--root) "/" dircotry)))
+
+(defun helm-ghq--open-dired-with-dircotry-in-other-window (dircotry)
+  (dired-other-window (concat (helm-ghq--root) "/" dircotry)))
+
+(defun helm-ghq--open-dired-with-dircotry-in-other-frame (dircotry)
+  (dired-other-frame (concat (helm-ghq--root) "/" dircotry)))
+
+(defvar helm-ghq--dired nil)
+
 (defvar helm-ghq--action
   '(("Open File" . find-file)
     ("Open File other window" . find-file-other-window)
     ("Open File other frame" . find-file-other-frame)
     ("Open Directory" . helm-ghq--open-dired)))
+
+(defvar helm-ghq--directory-action
+  '(("Open Directory" . helm-ghq--open-dired-with-dircotry)
+    ("Open Directory other window" . helm-ghq--open-dired-with-dircotry-in-other-window)
+    ("Open Direcotry other frame" . helm-ghq--open-dired-with-dircotry-in-other-frame)))
 
 (defvar helm-source-ghq
   (helm-build-sync-source "ghq"
@@ -180,22 +196,26 @@ even is \" -b\" is specified."
 
 (defun helm-ghq--ls-files ()
   (with-current-buffer (helm-candidate-buffer 'global)
-    (unless (or (zerop (apply #'call-process
-			      helm-ghq-command-git nil '(t nil) nil
-			      helm-ghq-command-git-arg-ls-files))
-		(zerop (apply #'call-process
-			      helm-ghq-command-svn nil '(t nil) nil
-			      helm-ghq-command-svn-arg-ls-files))
-		(zerop (apply #'call-process
-			      helm-ghq-command-hg nil t nil
-			      helm-ghq-command-hg-arg-ls-files)))
-      (error "Failed: Can't get file list candidates"))))
+    (unless (or (zerop (call-process "git" nil '(t nil) nil "ls-files"))
+                (zerop (call-process "hg" nil t nil "manifest")))
+      (error "Failed: git ls-files | hg manifest"))))
 
 (defun helm-ghq--source (repo)
   (let ((name (file-name-nondirectory (directory-file-name repo))))
     (helm-build-in-buffer-source name
       :init #'helm-ghq--ls-files
       :action helm-ghq--action)))
+
+(defun helm-ghq--list-directories ()
+  (with-current-buffer (helm-candidate-buffer 'global)
+    (unless (zerop (call-process "ghq" nil t nil "list"))
+      (error "Failed: ghq list"))))
+
+(defun helm-ghq--dired-source ()
+  `((name . "ghq direcotry list")
+    (init . helm-ghq--list-directories)
+    (candidates-in-buffer)
+    (action . ,helm-ghq--directory-action)))
 
 (defun helm-ghq--repo-to-user-project (repo)
   (cond ((string-match "github.com/\\(.+\\)" repo)
@@ -225,14 +245,18 @@ even is \" -b\" is specified."
 ;;;###autoload
 (defun helm-ghq ()
   (interactive)
-  (let ((repo (helm-comp-read "ghq-list: "
-                              (helm-ghq--list-candidates)
-                              :name "ghq list"
-                              :must-match t)))
-    (let ((default-directory (file-name-as-directory repo)))
-      (helm :sources (list (helm-ghq--source default-directory)
-                           (helm-ghq--source-update repo))
-            :buffer "*helm-ghq-list*"))))
+  (if helm-ghq--dired
+      (helm :buffer "*helm-ghq-list*"
+            :sources (helm-ghq--dired-source))
+    (let ((repo (helm-comp-read "ghq-list: "
+                                (helm-ghq--list-candidates)
+                                :name "ghq list"
+                                :must-match t)))
+      (let ((default-directory (file-name-as-directory repo)))
+        (helm :sources (list (helm-ghq--source default-directory)
+                             (helm-ghq--source-update repo))
+              :buffer "*helm-ghq-list*")))))
+
 
 (provide 'helm-ghq)
 
